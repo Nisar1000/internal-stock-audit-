@@ -1,0 +1,549 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Stock Audit - Excel Upload & Serial Verification</title>
+  <!-- SheetJS Library for Excel File Reading and Exporting -->
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  <style>
+    * { box-sizing: border-box; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+    body { background-color: #f1f5f9; margin: 0; padding: 20px; color: #0f172a; }
+    .container { max-width: 1050px; margin: 0 auto; display: grid; grid-template-columns: 1fr 2fr; gap: 20px; }
+    .card { background: white; padding: 20px; border-radius: 12px; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1); }
+    h2 { margin-top: 0; font-size: 1.2rem; color: #334155; }
+    
+    .file-drop {
+      border: 2px dashed #cbd5e1;
+      padding: 20px;
+      border-radius: 8px;
+      text-align: center;
+      background: #f8fafc;
+      margin-bottom: 15px;
+    }
+    input[type="file"] { margin-top: 10px; width: 100%; }
+    
+    label { font-size: 0.85rem; font-weight: bold; color: #475569; display: block; margin-top: 10px; }
+    select {
+      width: 100%;
+      padding: 10px;
+      border: 1px solid #cbd5e1;
+      border-radius: 8px;
+      margin-top: 5px;
+      margin-bottom: 10px;
+    }
+
+    .btn { width: 100%; padding: 12px; background: #2563eb; color: white; border: none; border-radius: 8px; font-weight: bold; cursor: pointer; transition: background 0.2s; }
+    .btn:hover { background: #1d4ed8; }
+    .btn-secondary { background: #64748b; margin-top: 10px; }
+    .btn-secondary:hover { background: #475569; }
+    .btn-danger { background: #ef4444; margin-top: 10px; }
+    .btn-danger:hover { background: #dc2626; }
+    
+    /* Indicator Box */
+    .indicator {
+      padding: 25px;
+      border-radius: 12px;
+      text-align: center;
+      font-size: 1.8rem;
+      font-weight: 800;
+      color: white;
+      background-color: #64748b;
+      transition: background-color 0.2s ease;
+      margin-bottom: 20px;
+      min-height: 100px;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+    }
+    .indicator.match { background-color: #22c55e; } /* GREEN */
+    .indicator.mismatch { background-color: #ef4444; } /* RED */
+    .indicator.duplicate { background-color: #f59e0b; } /* AMBER */
+    .indicator .subtext { font-size: 1rem; font-weight: 400; margin-top: 5px; }
+
+    .scan-input {
+      width: 100%;
+      padding: 16px;
+      font-size: 1.25rem;
+      border: 2px solid #2563eb;
+      border-radius: 8px;
+      outline: none;
+      margin-bottom: 20px;
+    }
+    
+    .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 20px; }
+    .stat-box { background: #f8fafc; border: 1px solid #e2e8f0; padding: 10px; border-radius: 8px; text-align: center; }
+    .stat-box .num { font-size: 1.4rem; font-weight: bold; }
+
+    /* Tabs Styling */
+    .tab-header { display: flex; border-bottom: 2px solid #e2e8f0; margin-bottom: 15px; }
+    .tab-btn {
+      padding: 8px 16px;
+      background: none;
+      border: none;
+      font-weight: bold;
+      color: #64748b;
+      cursor: pointer;
+      border-bottom: 3px solid transparent;
+    }
+    .tab-btn.active { color: #2563eb; border-bottom-color: #2563eb; }
+
+    .table-container { max-height: 320px; overflow-y: auto; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { text-align: left; padding: 10px; border-bottom: 1px solid #e2e8f0; font-size: 0.9rem; }
+    th { background: #f8fafc; font-size: 0.8rem; color: #64748b; position: sticky; top: 0; z-index: 1; }
+    
+    .badge { padding: 4px 8px; border-radius: 4px; font-weight: bold; font-size: 0.75rem; color: white; display: inline-block; }
+    .badge-green { background-color: #22c55e; }
+    .badge-red { background-color: #ef4444; }
+    .badge-amber { background-color: #f59e0b; }
+  </style>
+</head>
+<body>
+
+<div class="container">
+  <!-- Left Side: Controls & Stats -->
+  <div class="card">
+    <h2>1. Upload Excel File</h2>
+    <div class="file-drop">
+      <p style="margin: 0; font-size: 0.9rem; color: #64748b;">Select Excel (.xlsx, .xls) or CSV</p>
+      <input type="file" id="excelFile" accept=".xlsx, .xls, .csv">
+    </div>
+
+    <div id="columnSelectContainer" style="display: none;">
+      <label for="serialSelect">Select Serial Number Column:*</label>
+      <select id="serialSelect"></select>
+
+      <label for="nameSelect">Select Item Name Column (Optional):</label>
+      <select id="nameSelect"></select>
+
+      <button class="btn" onclick="startAudit()">Load & Start Audit</button>
+    </div>
+
+    <div style="margin-top: 25px;">
+      <h2>Audit Overview</h2>
+      <div class="stats">
+        <div class="stat-box">
+          <div id="statExpected" class="num">0</div>
+          <div style="font-size: 0.7rem; color: #64748b;">Expected</div>
+        </div>
+        <div class="stat-box">
+          <div id="statFound" class="num" style="color: #22c55e;">0</div>
+          <div style="font-size: 0.7rem; color: #64748b;">Matched</div>
+        </div>
+        <div class="stat-box">
+          <div id="statMissing" class="num" style="color: #f59e0b;">0</div>
+          <div style="font-size: 0.7rem; color: #64748b;">Missing</div>
+        </div>
+        <div class="stat-box">
+          <div id="statExtra" class="num" style="color: #ef4444;">0</div>
+          <div style="font-size: 0.7rem; color: #64748b;">Unexpected</div>
+        </div>
+      </div>
+      
+      <button id="exportBtn" class="btn btn-secondary" onclick="exportAuditReport()" disabled>Export Audit Report</button>
+      <button id="resetBtn" class="btn btn-danger" onclick="resetAuditData()">Reset / New Audit</button>
+    </div>
+  </div>
+
+  <!-- Right Side: Scanning & Detailed Data -->
+  <div class="card">
+    <h2>2. Scan Serial Number</h2>
+    
+    <!-- Big Indicator -->
+    <div id="indicator" class="indicator">
+      PLEASE UPLOAD EXCEL
+      <div class="subtext">Upload a file on the left to start</div>
+    </div>
+
+    <!-- Scan Input -->
+    <input type="text" id="scanInput" class="scan-input" placeholder="Click here or scan serial number..." autofocus autocomplete="off" disabled>
+
+    <!-- Navigation Tabs -->
+    <div class="tab-header">
+      <button class="tab-btn active" onclick="switchTab('log')">Live Scan Log</button>
+      <button class="tab-btn" onclick="switchTab('missing')">Missing Items (<span id="tabMissingCount">0</span>)</button>
+      <button class="tab-btn" onclick="switchTab('matched')">Matched Items (<span id="tabMatchedCount">0</span>)</button>
+    </div>
+
+    <!-- Tab Content Container -->
+    <div class="table-container">
+      <!-- Live Log Table -->
+      <table id="logTable">
+        <thead>
+          <tr>
+            <th>Time</th>
+            <th>Serial Number</th>
+            <th>Item Name</th>
+            <th>Status</th>
+          </tr>
+        </thead>
+        <tbody id="logBody"></tbody>
+      </table>
+
+      <!-- Missing Items Table -->
+      <table id="missingTable" style="display: none;">
+        <thead>
+          <tr>
+            <th>Serial Number</th>
+            <th>Item Name</th>
+            <th>Status</th>
+          </tr>
+        </thead>
+        <tbody id="missingBody"></tbody>
+      </table>
+
+      <!-- Matched Items Table -->
+      <table id="matchedTable" style="display: none;">
+        <thead>
+          <tr>
+            <th>Serial Number</th>
+            <th>Item Name</th>
+            <th>Scanned Time</th>
+          </tr>
+        </thead>
+        <tbody id="matchedBody"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<script>
+  // Core Audit State
+  let auditState = {
+    fileName: '',
+    serialCol: '',
+    nameCol: '',
+    masterItems: {}, // Key: Serial Number, Value: { name: '', matched: false, time: '' }
+    extraScans: [],  // Serials scanned that were NOT in master
+    scanLogs: []     // History of scans
+  };
+
+  const STORAGE_KEY = 'STOCK_AUDIT_SESSION_V1';
+
+  // Sound generator (Web Audio API)
+  const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  function playSound(type) {
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+
+    if (type === 'match') {
+      osc.frequency.setValueAtTime(800, audioCtx.currentTime);
+      gain.gain.setValueAtTime(0.1, audioCtx.currentTime);
+      osc.start();
+      osc.stop(audioCtx.currentTime + 0.15);
+    } else if (type === 'duplicate') {
+      osc.frequency.setValueAtTime(400, audioCtx.currentTime);
+      gain.gain.setValueAtTime(0.15, audioCtx.currentTime);
+      osc.start();
+      osc.stop(audioCtx.currentTime + 0.2);
+    } else {
+      osc.type = 'sawtooth';
+      osc.frequency.setValueAtTime(200, audioCtx.currentTime);
+      gain.gain.setValueAtTime(0.2, audioCtx.currentTime);
+      osc.start();
+      osc.stop(audioCtx.currentTime + 0.35);
+    }
+  }
+
+  // Auto-load session on page refresh
+  window.addEventListener('DOMContentLoaded', () => {
+    const saved = localStorage.getItem(STORAGE_KEY);
+    if (saved) {
+      try {
+        auditState = JSON.parse(saved);
+        updateUIFromState();
+        const indicator = document.getElementById('indicator');
+        indicator.className = 'indicator';
+        indicator.innerHTML = 'READY TO SCAN<div class="subtext">Restored active audit session</div>';
+        document.getElementById('scanInput').disabled = false;
+        document.getElementById('exportBtn').disabled = false;
+        focusScanInput();
+      } catch (e) {
+        console.error("Failed to restore session", e);
+      }
+    }
+  });
+
+  // Save current state to local storage
+  function saveState() {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(auditState));
+  }
+
+  // Read Excel File
+  let rawSheetData = [];
+  document.getElementById('excelFile').addEventListener('change', function(e) {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    auditState.fileName = file.name;
+    const reader = new FileReader();
+    reader.onload = function(evt) {
+      const data = new Uint8Array(evt.target.result);
+      const workbook = XLSX.read(data, { type: 'array' });
+      const firstSheetName = workbook.SheetNames[0];
+      const worksheet = workbook.Sheets[firstSheetName];
+      
+      rawSheetData = XLSX.utils.sheet_to_json(worksheet, { defval: "" });
+
+      if (rawSheetData.length === 0) {
+        alert("The selected Excel file is empty!");
+        return;
+      }
+
+      const columns = Object.keys(rawSheetData[0]);
+      const serialSelect = document.getElementById('serialSelect');
+      const nameSelect = document.getElementById('nameSelect');
+      
+      serialSelect.innerHTML = '';
+      nameSelect.innerHTML = '<option value="">-- None --</option>';
+
+      columns.forEach(col => {
+        const opt1 = document.createElement('option');
+        opt1.value = col;
+        opt1.innerText = col;
+        serialSelect.appendChild(opt1);
+
+        const opt2 = document.createElement('option');
+        opt2.value = col;
+        opt2.innerText = col;
+        nameSelect.appendChild(opt2);
+      });
+
+      document.getElementById('columnSelectContainer').style.display = 'block';
+    };
+    reader.readAsArrayBuffer(file);
+  });
+
+  // Load audit data from chosen columns
+  function startAudit() {
+    const serialCol = document.getElementById('serialSelect').value;
+    const nameCol = document.getElementById('nameSelect').value;
+
+    auditState.serialCol = serialCol;
+    auditState.nameCol = nameCol;
+    auditState.masterItems = {};
+    auditState.extraScans = [];
+    auditState.scanLogs = [];
+
+    rawSheetData.forEach(row => {
+      if (row[serialCol] !== undefined && row[serialCol] !== null) {
+        const serialVal = String(row[serialCol]).trim();
+        const nameVal = nameCol && row[nameCol] !== undefined ? String(row[nameCol]).trim() : 'N/A';
+        
+        if (serialVal.length > 0) {
+          auditState.masterItems[serialVal] = {
+            name: nameVal,
+            matched: false,
+            time: ''
+          };
+        }
+      }
+    });
+
+    saveState();
+    updateUIFromState();
+
+    const indicator = document.getElementById('indicator');
+    indicator.className = 'indicator';
+    indicator.innerHTML = 'READY TO SCAN<div class="subtext">Scan serial number using barcode scanner</div>';
+
+    document.getElementById('scanInput').disabled = false;
+    document.getElementById('exportBtn').disabled = false;
+    focusScanInput();
+  }
+
+  function focusScanInput() {
+    const input = document.getElementById('scanInput');
+    if (!input.disabled) input.focus();
+  }
+
+  // Process barcode scan
+  document.getElementById('scanInput').addEventListener('keypress', function(e) {
+    if (e.key === 'Enter') {
+      const code = this.value.trim();
+      this.value = '';
+      
+      if (!code) return;
+
+      const indicator = document.getElementById('indicator');
+      const now = new Date().toLocaleTimeString();
+
+      if (auditState.masterItems[code] !== undefined) {
+        const item = auditState.masterItems[code];
+
+        if (item.matched) {
+          // ALREADY MATCHED (DUPLICATE SCAN)
+          indicator.className = 'indicator duplicate';
+          indicator.innerHTML = `ALREADY SCANNED!<div class="subtext">${code} (${item.name}) was already matched</div>`;
+          playSound('duplicate');
+
+          auditState.scanLogs.unshift({ time: now, code: code, name: item.name, status: 'DUPLICATE' });
+        } else {
+          // NEW MATCH
+          item.matched = true;
+          item.time = now;
+
+          indicator.className = 'indicator match';
+          indicator.innerHTML = `MATCHED!<div class="subtext">${code} - ${item.name}</div>`;
+          playSound('match');
+
+          auditState.scanLogs.unshift({ time: now, code: code, name: item.name, status: 'MATCH' });
+        }
+      } else {
+        // NOT IN EXCEL
+        indicator.className = 'indicator mismatch';
+        indicator.innerHTML = `NOT IN EXCEL!<div class="subtext">${code} was NOT found in list</div>`;
+        playSound('mismatch');
+
+        auditState.extraScans.unshift({ code: code, time: now });
+        auditState.scanLogs.unshift({ time: now, code: code, name: 'Unknown Item', status: 'NOT FOUND' });
+      }
+
+      saveState();
+      updateUIFromState();
+      focusScanInput();
+    }
+  });
+
+  // Render and sync UI elements based on auditState
+  function updateUIFromState() {
+    const masterKeys = Object.keys(auditState.masterItems);
+    const expectedCount = masterKeys.length;
+    
+    let matchedCount = 0;
+    masterKeys.forEach(k => {
+      if (auditState.masterItems[k].matched) matchedCount++;
+    });
+
+    const missingCount = expectedCount - matchedCount;
+    const extraCount = auditState.extraScans.length;
+
+    // Update Numerical Indicators
+    document.getElementById('statExpected').innerText = expectedCount;
+    document.getElementById('statFound').innerText = matchedCount;
+    document.getElementById('statMissing').innerText = missingCount;
+    document.getElementById('statExtra').innerText = extraCount;
+
+    document.getElementById('tabMissingCount').innerText = missingCount;
+    document.getElementById('tabMatchedCount').innerText = matchedCount;
+
+    // Update Live Log
+    const logBody = document.getElementById('logBody');
+    logBody.innerHTML = auditState.scanLogs.map(log => {
+      let badgeClass = 'badge-green';
+      if (log.status === 'NOT FOUND') badgeClass = 'badge-red';
+      if (log.status === 'DUPLICATE') badgeClass = 'badge-amber';
+
+      return `<tr>
+        <td>${log.time}</td>
+        <td><strong>${log.code}</strong></td>
+        <td>${log.name}</td>
+        <td><span class="badge ${badgeClass}">${log.status}</span></td>
+      </tr>`;
+    }).join('');
+
+    // Update Missing Table
+    const missingBody = document.getElementById('missingBody');
+    const missingRows = [];
+    masterKeys.forEach(code => {
+      const item = auditState.masterItems[code];
+      if (!item.matched) {
+        missingRows.push(`<tr>
+          <td><strong>${code}</strong></td>
+          <td>${item.name}</td>
+          <td><span class="badge badge-amber">MISSING</span></td>
+        </tr>`);
+      }
+    });
+    missingBody.innerHTML = missingRows.join('');
+
+    // Update Matched Table
+    const matchedBody = document.getElementById('matchedBody');
+    const matchedRows = [];
+    masterKeys.forEach(code => {
+      const item = auditState.masterItems[code];
+      if (item.matched) {
+        matchedRows.push(`<tr>
+          <td><strong>${code}</strong></td>
+          <td>${item.name}</td>
+          <td>${item.time}</td>
+        </tr>`);
+      }
+    });
+    matchedBody.innerHTML = matchedRows.join('');
+  }
+
+  // Tab switching logic
+  function switchTab(tab) {
+    document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
+    document.getElementById('logTable').style.display = 'none';
+    document.getElementById('missingTable').style.display = 'none';
+    document.getElementById('matchedTable').style.display = 'none';
+
+    if (tab === 'log') {
+      document.querySelectorAll('.tab-btn')[0].classList.add('active');
+      document.getElementById('logTable').style.display = 'table';
+    } else if (tab === 'missing') {
+      document.querySelectorAll('.tab-btn')[1].classList.add('active');
+      document.getElementById('missingTable').style.display = 'table';
+    } else if (tab === 'matched') {
+      document.querySelectorAll('.tab-btn')[2].classList.add('active');
+      document.getElementById('matchedTable').style.display = 'table';
+    }
+  }
+
+  // Export audit summary to Excel
+  function exportAuditReport() {
+    const reportData = [];
+
+    // Matched & Missing Items
+    Object.keys(auditState.masterItems).forEach(code => {
+      const item = auditState.masterItems[code];
+      reportData.push({
+        "Serial Number": code,
+        "Item Name": item.name,
+        "Audit Status": item.matched ? "MATCHED" : "MISSING",
+        "Scan Time": item.time || "N/A"
+      });
+    });
+
+    // Unexpected / Extra Scans
+    auditState.extraScans.forEach(scan => {
+      reportData.push({
+        "Serial Number": scan.code,
+        "Item Name": "Unknown (Not in original list)",
+        "Audit Status": "UNEXPECTED / EXTRA",
+        "Scan Time": scan.time
+      });
+    });
+
+    const worksheet = XLSX.utils.json_to_sheet(reportData);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, "Audit Report");
+    
+    XLSX.writeFile(workbook, `Stock_Audit_Report_${new Date().toISOString().slice(0,10)}.xlsx`);
+  }
+
+  // Reset audit state & clear storage
+  function resetAuditData() {
+    if (confirm("Are you sure you want to clear this audit session? All saved progress will be lost.")) {
+      localStorage.removeItem(STORAGE_KEY);
+      location.reload();
+    }
+  }
+
+  // Auto focus input on click
+  document.addEventListener('click', (e) => {
+    if (e.target.tagName !== 'INPUT' && e.target.tagName !== 'SELECT' && e.target.tagName !== 'BUTTON') {
+      focusScanInput();
+    }
+  });
+</script>
+
+</body>
+</html>
